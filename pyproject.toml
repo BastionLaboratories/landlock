@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "landlock"
+version = "0.1.0"
+description = "Pin a file's exact bytes, rehearse a change in a sandbox, land it only with a signed approval, and roll back by itself if the dependent tests fail."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+landlock = "landlock.cli:main"
+
+[project.urls]
+Repository = "https://github.com/BastionLaboratories/landlock"
+
+[tool.setuptools]
+packages = ["landlock"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
