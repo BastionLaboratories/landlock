@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from landlock.errors import Refused
 from landlock.pin import pin
 from landlock.rehearse import Verdict, rehearse
@@ -527,6 +526,85 @@ def test_the_sandbox_has_no_network(make_cfg, live, candidate):
     v = rehearse(cfg, pin(str(live)), str(candidate))
     assert v.would_land is True, v.output
     assert "links ['lo']" in v.output
+
+
+RECORD_LOCK_FOLDER = "/tmp/bastion_record_locks"  # because: the one folder a ledger road locks every temp-root record under, whatever the process's TMPDIR; since 0.1.2 the rehearsal shows it private and writable
+
+
+@needs_bwrap
+def test_a_lock_is_made_in_the_record_lock_folder_and_the_machine_folder_is_untouched(make_cfg, live, candidate, tmp_path):
+    # Since 0.1.2: a test that writes a record under the temp root makes its
+    # lock in the one record-lock folder, never under TMPDIR. Inside the
+    # rehearsal that folder is private and writable (0.1.1 refused the lock:
+    # read-only file system); the machine's folder never sees the lock.
+    folder = Path(RECORD_LOCK_FOLDER)
+    made_here = not os.path.lexists(folder)
+    sentinel = None
+    if made_here:
+        # A clean machine (the suite's own sandbox) has no such folder: it is
+        # made here as the ledger road makes it, with a sentinel the rehearsal
+        # must not see; both are removed when the test ends.
+        folder.mkdir()
+        folder.chmod(0o1777)
+        sentinel = folder / ("sentinel_%d" % os.getpid())
+        sentinel.write_bytes(b"machine\n")
+    name = "landlock_probe_%d_%d.lock" % (os.getpid(), time.monotonic_ns())
+    try:
+        body = (
+            "import os, sys\n"
+            "folder, name = sys.argv[1], sys.argv[2]\n"
+            "fd = os.open(os.path.join(folder, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+            "os.write(fd, b'held')\n"
+            "os.close(fd)\n"
+            "seen = sorted(os.listdir(folder))\n"
+            "assert seen == [name], seen\n"
+            "print('made the lock in a private folder')\n"
+        )
+        cfg = make_cfg(default=probe(tmp_path, body, str(folder), name))
+        v = rehearse(cfg, pin(str(live)), str(candidate))
+        assert v.would_land is True, v.output
+        assert "made the lock in a private folder" in v.output
+        assert not os.path.lexists(folder / name)
+        if sentinel is not None:
+            assert sentinel.read_bytes() == b"machine\n"
+            assert sorted(os.listdir(folder)) == [sentinel.name]
+        assert rehearse_mod.RECORD_LOCK_FOLDER == RECORD_LOCK_FOLDER
+    finally:
+        if made_here:
+            if sentinel is not None and sentinel.exists():
+                sentinel.unlink()
+            # The folder this test made goes only when it is empty; a lock another
+            # writer laid there meanwhile keeps it standing, as the shared folder.
+            if not os.listdir(folder):
+                folder.rmdir()
+
+
+@needs_bwrap
+def test_an_absent_record_lock_folder_stays_absent_and_the_rehearsal_still_runs(
+    make_cfg, live, candidate, tmp_path, monkeypatch
+):
+    # bwrap cannot make a mount point under the read-only machine ("Can't mkdir
+    # ...: Read-only file system"), so on a machine with no record-lock folder
+    # nothing is mounted there: the rehearsal still starts and runs, the path
+    # stays read-only as before 0.1.2, and the machine still has no such folder.
+    absent = tmp_path / "no_record_lock_folder"
+    monkeypatch.setattr(rehearse_mod, "RECORD_LOCK_FOLDER", str(absent))
+    body = (
+        "import errno, os, sys\n"
+        "folder = sys.argv[1]\n"
+        "try:\n"
+        "    os.makedirs(folder)\n"
+        "except OSError as exc:\n"
+        "    assert exc.errno == errno.EROFS, exc\n"
+        "    print('the absent folder stays read-only')\n"
+        "else:\n"
+        "    sys.exit('the absent folder was made inside the rehearsal')\n"
+    )
+    cfg = make_cfg(default=probe(tmp_path, body, str(absent)))
+    v = rehearse(cfg, pin(str(live)), str(candidate))
+    assert v.would_land is True, v.output
+    assert "the absent folder stays read-only" in v.output
+    assert not os.path.lexists(absent)
 
 
 @needs_bwrap

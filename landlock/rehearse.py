@@ -15,6 +15,11 @@ mode, and the file's test command runs inside bubblewrap:
 - a write to the live path lands in the scratch file and is thrown away with
   it; a write anywhere else in the folder is refused by the kernel (read-only
   file system); TMPDIR is a fresh writable folder;
+- the one record-lock folder (RECORD_LOCK_FOLDER) is a fresh, empty, writable
+  memory-backed folder when the machine's own folder of that name stands as a
+  real folder (a mount point cannot be made on the read-only machine), laid
+  first so every other mount lands over it; a lock made there is thrown away
+  with the sandbox and the machine's own folder is never written;
 - the user's real home folder is replaced by a fresh empty memory-backed
   folder, which is also HOME;
 - walls.rehearse_ro_dirs lists absolute folders that are mounted read-only
@@ -74,6 +79,7 @@ DEFAULT_TEST_WALL_S = 300  # because: the contract's default walls.test_wall_s w
 DEFAULT_LOAD_MAX = 48.0  # because: the contract's default walls.load_max when a config gives none
 _FALLBACK_PATH = "/usr/local/bin:/usr/bin:/bin"  # because: the usual system PATH when the caller's PATH is empty
 _REAP_WAIT_S = 10  # because: seconds to collect a killed child's last output before giving up on it
+RECORD_LOCK_FOLDER = "/tmp/bastion_record_locks"  # because: the ledger road's rule (its court's finding of 2026-11-02 13:38:35): a record under the temp root locks under the machine's one folder at this path, never under the process's TMPDIR, so a test that writes such a record needs this path writable; the rehearsal mounts a private, empty, writable folder here and the machine's own folder is never touched
 
 
 @dataclass(frozen=True)
@@ -408,6 +414,16 @@ def _real_home() -> str | None:
     return home
 
 
+def _lock_folder_mount() -> list[str]:
+    """The bwrap words that show a private, empty, writable folder at the one record-lock path; none when the machine's own folder does not stand as a real folder."""
+    # because: bwrap cannot make a mount point under the read-only machine: with the folder absent, "--dir" before "--tmpfs" stops the whole
+    # sandbox with "bwrap: Can't mkdir <path>: Read-only file system" (bubblewrap 0.9.0, measured), so the folder is shown only where it stands
+    # and an absent one stays absent and read-only, as before 0.1.2
+    if os.path.isdir(RECORD_LOCK_FOLDER) and not os.path.islink(RECORD_LOCK_FOLDER):
+        return ["--tmpfs", RECORD_LOCK_FOLDER]
+    return []
+
+
 def _sandbox_argv(
     bwrap: str,
     folder: str,
@@ -430,6 +446,8 @@ def _sandbox_argv(
         "--ro-bind", "/", "/",
         "--dev", "/dev",
         "--proc", "/proc",
+        # The private record-lock folder, laid before every other mount so each lands over it.
+        *_lock_folder_mount(),
     ]
     # (sandbox path, host source or None for a memory folder, rank): outer folders first.
     plan = []

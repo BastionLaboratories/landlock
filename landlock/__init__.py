@@ -19,7 +19,7 @@ from typing import Any
 from .errors import Fault, Refused
 from .pin import Pin, check, sha256_of
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 # name -> (sibling module, attribute in that module)
 _LAZY = {

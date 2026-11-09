@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "landlock"
-version = "0.1.1"
+version = "0.1.2"
 description = "Pin a file's exact bytes, rehearse a change in a sandbox, land it only with a signed approval, and roll back by itself if the dependent tests fail."
 readme = "README.md"
 requires-python = ">=3.12"

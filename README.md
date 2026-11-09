@@ -96,6 +96,8 @@ The sandbox also hides your home folder. Tools that are installed only under you
 
 `walls.rehearse_extra_dirs`, the older list of folders inside a root, still works; since version 0.1.1 its folders are shown read-only the same way instead of copied, so a test can no longer write into them.
 
+Since version 0.1.2 one more folder is writable: when the shared record-lock folder `/tmp/bastion_record_locks` stands on the machine, the sandbox shows an empty memory folder at that path (`landlock.rehearse.RECORD_LOCK_FOLDER`), so a test whose code locks a record there can make its lock. The lock is thrown away with the run and the machine's own folder is never written. When the folder does not stand on the machine, nothing is shown there and the path stays read-only, as before.
+
 The candidate is shown at the target's real path and at every other path a listed folder gives it: if a listed folder is a link that leads into the target's folder, the target read, run or imported through that link is the candidate too.
 
 ## Receipts
