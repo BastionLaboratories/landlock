@@ -7,7 +7,7 @@ It is plain Python 3.12 with no third-party packages. Repository: `BastionLabora
 ## The four parts
 
 1. **Pin.** `pin` records a file's sha256, size and modification time. Every later step takes a pin, never a bare path, and refuses if the file's bytes have moved since.
-2. **Rehearse.** The candidate file is placed in a scratch copy of the target's folder and the tests run there, inside a bubblewrap sandbox: the real filesystem read-only, the scratch folder writable, a throwaway home, no network, a time limit. The answer is `WOULD LAND` or `WOULD REFUSE`, with the test output. The real file is never written, and a test command that names the real file refuses before anything runs.
+2. **Rehearse.** The candidate's bytes are shown at the target's own path inside a bubblewrap sandbox and the tests run there: nothing is copied, the real filesystem is read-only, a scratch temporary folder is writable, the home folder is a throwaway, there is no network and there is a time limit. The answer is `WOULD LAND` or `WOULD REFUSE`, with the test output. The real file is never written, and a test command that names the real file refuses before anything runs.
 3. **Approve.** An approval is a signature (HMAC-SHA256) over the target path, the candidate's sha256, the pin's sha256 and an expiry, made with a secret key file that only you hold (mode 600, kept outside the folders landlock may change). One approval covers exactly one candidate and can be used once: after a landing has been done under an approval, landing again with the same approval refuses, and you approve again. Rolling back and recovering never need an approval. An unsigned, expired, wrong-file or moved-bytes approval refuses.
 4. **Land.** With a good approval and a fresh pin, the old copy is laid beside the file as `name.pre_land_<stamp>`, the candidate is written to a temporary name in the same folder, flushed to disk and renamed over the file in one call. Then the tests of every registered dependent run. A failing test, or any crash, restores the old copy by the same rename. After the dependents' tests, the file is measured once more: if its bytes are anything other than the candidate's, the old copy is restored and the run is reported as a fault naming both digests. A small journal lets `recover` finish or undo a run that was killed at any step.
 
@@ -45,13 +45,14 @@ default = ["python3", "-m", "pytest", "-q"]
 test_wall_s = 300
 load_max = 48.0
 approval_ttl_s = 86400
+rehearse_ro_dirs = ["/srv/shared/lib"]
 ```
 
 - `roots`: the folders files may be landed into. A path outside them refuses.
-- `receipts` and `secret`: must be outside every root.
+- `receipts` and `secret`: must be outside every root, and must be two different files.
 - `tests`: the command that tests a file; `default` for all, `by_path` for particular files.
 - `dependents`: for a file, the other files whose tests run after it lands.
-- `walls`: the test time limit in seconds, a machine load limit, how long an approval lives, and `rehearse_extra_dirs`, the other folders a rehearsal's tests need copied in.
+- `walls`: the test time limit in seconds, a machine load limit, how long an approval lives, and two lists of folders a rehearsal shows read-only (never copied): `rehearse_ro_dirs`, folders anywhere on the machine, and `rehearse_extra_dirs`, the older list, folders inside a root.
 
 ## The command line
 
@@ -87,9 +88,15 @@ While a landing, a rollback or a recovery is running, landlock keeps one lock fi
 
 ## What a rehearsal sees
 
-The candidate is shown at the live file's own path inside the sandbox, so imports and paths in your tests that use the file's real location see the candidate, not the old file. The rest of the machine is read-only. The sandbox gets a copy of the target's whole folder (siblings included). If a test needs another folder, list it in `walls.rehearse_extra_dirs` (absolute paths inside a root); each is copied and shown the same way.
+The candidate is shown at the live file's own path inside the sandbox, so imports and paths in your tests that use the file's real location see the candidate, not the old file. Nothing is copied: the target's folder is shown read-only at its own path, and only the candidate's bytes, kept in a scratch file with the live file's mode, are laid over the live file. A big folder rehearses as fast as a small one, and a file beside the target that you cannot read does no harm. Your tests may write to the live path (the write goes to the scratch file and is thrown away), to the folder named by `TMPDIR`, and to the throwaway home folder (an empty memory folder, gone after the run); any other write is refused by the kernel as a read-only file system. The rest of the machine is read-only. A target that is a symbolic link is refused, as a landing refuses one.
 
-The sandbox also hides your home folder. Tools that are installed only under your home, such as a pytest installed with `pip install --user`, are not seen. Install the test tool system-wide, or put its full path in the test command in the config.
+The sandbox also hides your home folder. Tools that are installed only under your home, such as a pytest installed with `pip install --user`, are not seen unless you show them again: install the test tool system-wide, put its full path in the test command, or list its folder in `walls.rehearse_ro_dirs`.
+
+`walls.rehearse_ro_dirs` lists folders a rehearsal shows read-only at their own paths, never copied. They may lie anywhere on the machine, outside every root, because nothing can be written through them; that includes folders inside your hidden home, such as a per-user package folder or a link to a data folder. A link inside your hidden home is shown at the path you wrote, so code that reaches a folder through the link finds it; the folder the link points to is not shown at its own path unless you list it too. A link that the sandbox can already see (outside your home, or inside another listed folder or the target's folder) stays a link, and the folder it points to is shown so the link leads somewhere. Every entry must be an absolute path to an existing folder, written without `..`, and a rehearsal refuses one that is not, naming it. Your home folder itself is never listed whole (a rehearsal refuses it, and refuses a link that would show it through another path); list the entries of it your tests need. An entry whose path, and the path its links lead to, both lie at or inside the target's folder is skipped, since that folder already shows it, and a repeated entry is shown once. The secret and receipts files stay masked by an empty file wherever the sandbox shows them, a listed folder and a link to it included.
+
+`walls.rehearse_extra_dirs`, the older list of folders inside a root, still works; since version 0.1.1 its folders are shown read-only the same way instead of copied, so a test can no longer write into them.
+
+The candidate is shown at the target's real path and at every other path a listed folder gives it: if a listed folder is a link that leads into the target's folder, the target read, run or imported through that link is the candidate too.
 
 ## Receipts
 

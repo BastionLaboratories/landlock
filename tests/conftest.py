@@ -13,7 +13,9 @@ The fixtures named by the contract:
   for a missing secret simply by not asking for this fixture).
 
 One more helper, make_cfg, builds a Config with extra tests or dependents for
-tests that need them; cfg is make_cfg() with no extras.
+tests that need them; cfg is make_cfg() with no extras. An autouse fixture,
+temp_under_tmp_path, points the temporary folder of every test under
+tmp_path/temp, so a rehearsal's scratch never lands in the system temp.
 
 Everything stays inside pytest's tmp_path.
 """
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -101,6 +104,15 @@ def render_toml(roots, receipts, secret, default_argv, by_path, dependents, wall
     for key, value in walls.items():
         lines.append(key + " = " + _toml_value(value))
     return "\n".join(lines) + "\n"
+
+
+@pytest.fixture(autouse=True)
+def temp_under_tmp_path(tmp_path, monkeypatch) -> Path:
+    """Every temporary folder the code under test makes (a rehearsal's scratch included) goes under tmp_path/temp, never the system temp."""
+    where = tmp_path / "temp"
+    where.mkdir(exist_ok=True)
+    monkeypatch.setattr(tempfile, "tempdir", str(where))
+    return where
 
 
 @pytest.fixture

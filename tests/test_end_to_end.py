@@ -319,7 +319,7 @@ def test_positive_road_through_the_public_names(
     from landlock.receipts import rows, verify_chain
     from landlock.rehearse import rehearse
 
-    assert landlock.__version__ == "0.1.0"
+    assert landlock.__version__ == "0.1.1"
     cfg = make_cfg(
         by_path={str(dependent): PASSING_ARGV},
         dependents={str(target): [str(dependent)]},

@@ -360,7 +360,7 @@ def test_round_tripped_pin_still_checks(tmp_path):
 
 
 def test_version_is_the_contract_version():
-    assert landlock.__version__ == "0.1.0"
+    assert landlock.__version__ == "0.1.1"
 
 
 def test_package_reexports_the_names_this_piece_owns():

@@ -30,10 +30,20 @@ Example file:
     load_max = 48.0
     approval_ttl_s = 86400
     rehearse_extra_dirs = []
+    rehearse_ro_dirs = ["/srv/shared/lib"]
 
-The wall rehearse_extra_dirs lists absolute folders inside a root that a
-rehearsal copies and binds beside the target's own folder; the other walls
-are numbers above zero.
+The wall rehearse_ro_dirs (optional; absent unless given) lists absolute
+folders that a rehearsal shows read-only at their own paths, never copied; they
+may lie outside every root because nothing can be written through them, and an
+entry of the hidden home folder (a link, a per-user package folder) is shown
+again at the path as written. The wall rehearse_extra_dirs, kept for configs
+written before it, lists absolute folders inside a root that a rehearsal shows
+the same way (read-only, never copied). The loader refuses a relative entry, an
+entry that climbs with '..', or an entry that exists and is not a folder; a
+rehearsal also refuses an entry that does not exist, the home folder whole, or
+a link that would show the home through another path. The receipts file and
+the secret file must be two different files. The other walls are numbers above
+zero.
 """
 
 from __future__ import annotations
@@ -51,6 +61,7 @@ DEFAULT_WALLS = {
     "approval_ttl_s": 86400,
     "rehearse_extra_dirs": [],
 }
+_OPTIONAL_WALLS = ("rehearse_ro_dirs",)  # because: walls kept in a config only when it names them, so a 0.1.0 config reads back unchanged
 _NUMERIC_WALLS = ("test_wall_s", "load_max", "approval_ttl_s")
 
 _TOP_KEYS = ("roots", "receipts", "secret", "tests", "dependents", "walls")
@@ -133,6 +144,8 @@ class Config:
             raise _refuse(f"receipts must live outside every root: {self.receipts}")
         if _in_any(self.roots, self.secret):
             raise _refuse(f"secret must live outside every root: {self.secret}")
+        if os.path.realpath(self.receipts) == os.path.realpath(self.secret):
+            raise _refuse(f"receipts and secret must be two different files: {self.receipts}")
 
         self.tests = self._check_tests(self.tests)
         self.dependents = self._check_dependents(self.dependents)
@@ -188,7 +201,7 @@ class Config:
         if not isinstance(walls, dict):
             raise _refuse("walls must be a table")
         for key in walls:
-            if key not in DEFAULT_WALLS:
+            if key not in DEFAULT_WALLS and key not in _OPTIONAL_WALLS:
                 raise _refuse(f"unknown wall: {key!r}")
         merged = dict(DEFAULT_WALLS)
         merged.update(walls)
@@ -196,7 +209,23 @@ class Config:
             _number(merged[key], f"walls.{key}")
         merged["load_max"] = float(merged["load_max"])
         merged["rehearse_extra_dirs"] = self._check_extra_dirs(merged["rehearse_extra_dirs"])
+        if "rehearse_ro_dirs" in merged:
+            merged["rehearse_ro_dirs"] = self._check_ro_dirs(merged["rehearse_ro_dirs"])
         return merged
+
+    def _check_ro_dirs(self, listed) -> list:
+        """Absolute folders shown read-only in a rehearsal; they may lie outside the roots."""
+        if not isinstance(listed, (list, tuple)):
+            raise _refuse("walls.rehearse_ro_dirs must be a list of folders")
+        out = []
+        for item in listed:
+            path = _text_path(item, "a walls.rehearse_ro_dirs entry")
+            if os.pardir in path.split(os.sep):
+                raise _refuse(f"a walls.rehearse_ro_dirs entry must not climb with '..': {path}")
+            if os.path.exists(path) and not os.path.isdir(path):
+                raise _refuse(f"a walls.rehearse_ro_dirs entry is not a directory: {path}")
+            out.append(path)
+        return out
 
     def _check_extra_dirs(self, listed) -> list:
         if not isinstance(listed, (list, tuple)):

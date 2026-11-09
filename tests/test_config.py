@@ -236,6 +236,48 @@ def test_extra_dirs_entry_that_is_not_text_refuses(home):
     assert _refusal(lambda: load_config(path)).startswith("REFUSED: a walls.rehearse_extra_dirs entry must be a non-empty path string")
 
 
+def test_ro_dirs_relative_entry_refuses(home):
+    path = home.toml(extra="[walls]\nrehearse_ro_dirs = [\"lib\"]\n")
+    assert _refusal(lambda: load_config(path)).startswith("REFUSED: a walls.rehearse_ro_dirs entry must be an absolute path")
+
+
+def test_ro_dirs_entry_that_is_a_file_refuses(home, tmp_path):
+    plain = str(tmp_path / "plain.txt")
+    with open(plain, "w", encoding="utf-8") as handle:
+        handle.write("x")
+    path = home.toml(extra=f"[walls]\nrehearse_ro_dirs = {_list([plain])}\n")
+    assert _refusal(lambda: load_config(path)) == f"REFUSED: a walls.rehearse_ro_dirs entry is not a directory: {plain}"
+
+
+def test_ro_dirs_not_a_list_refuses(home, tmp_path):
+    path = home.toml(extra=f"[walls]\nrehearse_ro_dirs = {_s(str(tmp_path))}\n")
+    assert _refusal(lambda: load_config(path)) == "REFUSED: walls.rehearse_ro_dirs must be a list of folders"
+
+
+def test_ro_dirs_entry_that_climbs_refuses(home, tmp_path):
+    entry = str(tmp_path / "a") + "/../b"
+    path = home.toml(extra=f"[walls]\nrehearse_ro_dirs = {_list([entry])}\n")
+    assert _refusal(lambda: load_config(path)) == f"REFUSED: a walls.rehearse_ro_dirs entry must not climb with '..': {entry}"
+
+
+def test_receipts_equal_to_secret_refuses(home):
+    path = home.toml(receipts=home.secret)
+    assert _refusal(lambda: load_config(path)) == f"REFUSED: receipts and secret must be two different files: {home.secret}"
+
+
+def test_receipts_reaching_the_secret_by_a_link_refuses(home, tmp_path):
+    side_alias = str(tmp_path / "side_alias")
+    os.symlink(home.side, side_alias)
+    receipts = os.path.join(side_alias, "secret")
+    path = home.toml(receipts=receipts)
+    assert _refusal(lambda: load_config(path)) == f"REFUSED: receipts and secret must be two different files: {receipts}"
+
+
+def test_ro_dirs_entry_that_is_not_text_refuses(home):
+    path = home.toml(extra="[walls]\nrehearse_ro_dirs = [4]\n")
+    assert _refusal(lambda: load_config(path)).startswith("REFUSED: a walls.rehearse_ro_dirs entry must be a non-empty path string")
+
+
 def test_other_walls_stay_numeric_when_a_list_is_given(home):
     path = home.toml(extra=f"[walls]\ntest_wall_s = {_list([home.root])}\n")
     assert _refusal(lambda: load_config(path)).startswith("REFUSED: walls.test_wall_s must be a number above zero")
@@ -370,6 +412,26 @@ def test_to_dict_hands_out_a_copy_of_the_extra_dirs(home):
     cfg = load_config(home.toml(extra=f"[walls]\nrehearse_extra_dirs = {_list([lib])}\n"))
     cfg.to_dict()["walls"]["rehearse_extra_dirs"].append("x")
     assert cfg.walls["rehearse_extra_dirs"] == [lib]
+
+
+def test_ro_dirs_may_lie_outside_the_roots_and_survive_the_round_trip(home, tmp_path):
+    outside = str(tmp_path / "shared")
+    os.makedirs(outside)
+    later = str(tmp_path / "later")
+    cfg = load_config(home.toml(extra=f"[walls]\nrehearse_ro_dirs = {_list([outside, later])}\n"))
+    assert cfg.walls["rehearse_ro_dirs"] == [outside, later]
+    assert cfg.walls["rehearse_extra_dirs"] == []
+    assert json.loads(cfg.to_json())["walls"]["rehearse_ro_dirs"] == [outside, later]
+    assert Config.from_json(cfg.to_json()) == cfg
+    assert Config.from_dict(cfg.to_dict()) == cfg
+    cfg.to_dict()["walls"]["rehearse_ro_dirs"].append("x")
+    assert cfg.walls["rehearse_ro_dirs"] == [outside, later]
+
+
+def test_ro_dirs_are_absent_unless_a_config_names_them(home):
+    cfg = load_config(home.toml())
+    assert "rehearse_ro_dirs" not in cfg.walls
+    assert "rehearse_ro_dirs" not in json.loads(cfg.to_json())["walls"]
 
 
 def test_a_config_with_only_the_three_paths_loads(home):
